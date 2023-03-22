@@ -30,7 +30,81 @@
 #include "esp_log.h"
 #include "mqtt_client.h"
 
+#include "driver/gpio.h"
+#include "led_strip.h"
+#include "sdkconfig.h"
+
 static const char *TAG = "MQTT_EXAMPLE";
+
+#define BLINK_GPIO CONFIG_BLINK_GPIO
+
+static uint8_t s_led_state = 0;
+
+#ifdef CONFIG_BLINK_LED_RMT
+static led_strip_t *pStrip_a;
+
+static void blink_led(void)
+{
+    /* If the addressable LED is enabled */
+    if (s_led_state) {
+        /* Set the LED pixel using RGB from 0 (0%) to 255 (100%) for each color */
+        pStrip_a->set_pixel(pStrip_a, 0, 16, 16, 16);
+        /* Refresh the strip to send data */
+        pStrip_a->refresh(pStrip_a, 100);
+    } else {
+        /* Set all LED off to clear all pixels */
+        pStrip_a->clear(pStrip_a, 50);
+    }
+}
+
+static void configure_led(void)
+{
+    ESP_LOGI(TAG, "Example configured to blink addressable LED!");
+    /* LED strip initialization with the GPIO and pixels number*/
+    pStrip_a = led_strip_init(CONFIG_BLINK_LED_RMT_CHANNEL, BLINK_GPIO, 1);
+    /* Set all LED off to clear all pixels */
+    pStrip_a->clear(pStrip_a, 50);
+}
+
+#elif CONFIG_BLINK_LED_GPIO
+
+static void blink_led(void)
+{
+    /* Set the GPIO level according to the state (LOW or HIGH)*/
+    gpio_set_level(BLINK_GPIO, s_led_state);
+}
+
+static void configure_led(void)
+{
+    ESP_LOGI(TAG, "Example configured to blink GPIO LED!");
+    gpio_reset_pin(BLINK_GPIO);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+}
+
+static void connection_led(void)
+{
+    ESP_LOGI(TAG, "Connecting!");
+    for(int i=0; i<5; i++)
+    {
+        blink_led();
+        /* Toggle the LED state */
+        s_led_state = !s_led_state;
+        vTaskDelay(CONFIG_BLINK_PERIOD / portTICK_PERIOD_MS);
+    }
+}
+
+static void led_on(void)
+{
+    gpio_set_level(BLINK_GPIO, 1);
+}
+
+static void led_off(void)
+{
+    gpio_set_level(BLINK_GPIO, 0);
+}
+
+#endif
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -56,8 +130,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
     switch ((esp_mqtt_event_id_t)event_id) {
+
     case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+    /*  
         msg_id = esp_mqtt_client_publish(client, "/topic/qos1", "data_3", 0, 1, 0);
         ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
 
@@ -69,27 +144,51 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos1");
         ESP_LOGI(TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
+    */
+        connection_led();
+        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        msg_id = esp_mqtt_client_publish(client, "luishg0111/feeds/esp", "ONLINE", 0, 1, 0);
+        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+
+        msg_id = esp_mqtt_client_subscribe(client, "luishg0111/feeds/led", 0);
+        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
         break;
+
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        msg_id = esp_mqtt_client_publish(client, "luishg0111/feeds/esp", "OFFLINE", 0, 1, 0);
+        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         break;
 
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
-        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         break;
+
     case MQTT_EVENT_UNSUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
         break;
+
     case MQTT_EVENT_PUBLISHED:
         ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
         break;
+
     case MQTT_EVENT_DATA:
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
+        //printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+        //printf("DATA=%.*s\r\n", event->data_len, event->data);
+        if(*(event->data) == '1')
+        {
+            ESP_LOGI(TAG, "Mamalona encendida");
+            led_on();
+        }
+        else 
+        {
+            ESP_LOGI(TAG, "Mamalona apagada");
+            led_off();
+        }
+        
         break;
+
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
         if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
@@ -109,12 +208,21 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 static void mqtt_app_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = CONFIG_BROKER_URL,
+        //.uri = "mqtt://io.adafruit.com"
+        //.port = 18591,
+        //.client_id = "esp32_luis",
+        //.username = "luishg0111",
+        //.password = "aio_ZxpP23dpfPkeiks0nKgM9V0g1TF6",
+        .uri = CONFIG_BROKER_URL,
+        .port = CONFIG_BROKER_PORT,
+        .client_id = CONFIG_BROKER_CLIENT_ID,
+        .username = CONFIG_BROKER_USERNAME,
+        .password = CONFIG_BROKER_PASSWORD,
     };
 #if CONFIG_BROKER_URL_FROM_STDIN
     char line[128];
 
-    if (strcmp(mqtt_cfg.broker.address.uri, "FROM_STDIN") == 0) {
+    if (strcmp(mqtt_cfg.uri, "FROM_STDIN") == 0) {
         int count = 0;
         printf("Please enter url of mqtt broker\n");
         while (count < 128) {
@@ -128,7 +236,7 @@ static void mqtt_app_start(void)
             }
             vTaskDelay(10 / portTICK_PERIOD_MS);
         }
-        mqtt_cfg.broker.address.uri = line;
+        mqtt_cfg.uri = line;
         printf("Broker url: %s\n", line);
     } else {
         ESP_LOGE(TAG, "Configuration mismatch: wrong broker url");
@@ -144,18 +252,20 @@ static void mqtt_app_start(void)
 
 void app_main(void)
 {
+    /* Configure the peripheral according to the LED type */
+    configure_led();
 
     ESP_LOGI(TAG, "[APP] Startup..");
     ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
 
     esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
+    esp_log_level_set("MQTT_CLIENT", ESP_LOG_VERBOSE);
     esp_log_level_set("MQTT_EXAMPLE", ESP_LOG_VERBOSE);
     esp_log_level_set("TRANSPORT_BASE", ESP_LOG_VERBOSE);
     esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
     esp_log_level_set("TRANSPORT", ESP_LOG_VERBOSE);
-    esp_log_level_set("outbox", ESP_LOG_VERBOSE);
+    esp_log_level_set("OUTBOX", ESP_LOG_VERBOSE);
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());

@@ -1,5 +1,48 @@
 menu "Example Configuration"
-            
+
+    choice BLINK_LED
+        prompt "Blink LED type"
+        default BLINK_LED_GPIO if IDF_TARGET_ESP32
+        default BLINK_LED_RMT
+        help
+            Defines the default peripheral for blink example
+
+        config BLINK_LED_GPIO
+            bool "GPIO"
+        config BLINK_LED_RMT
+            bool "RMT - Addressable LED"
+    endchoice
+
+    config BLINK_LED_RMT_CHANNEL
+        depends on BLINK_LED_RMT
+        int "RMT Channel"
+        range 0 7
+        default 0
+        help
+            Set the RMT peripheral channel.
+            ESP32 RMT channel from 0 to 7
+            ESP32-S2 RMT channel from 0 to 3
+            ESP32-S3 RMT channel from 0 to 3
+            ESP32-C3 RMT channel from 0 to 1
+
+    config BLINK_GPIO
+        int "Blink GPIO number"
+        range 0 48
+        default 8 if IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32H2
+        default 18 if IDF_TARGET_ESP32S2
+        default 48 if IDF_TARGET_ESP32S3
+        default 5
+        help
+            GPIO number (IOxx) to blink on and off or the RMT signal for the addressable LED.
+            Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used to blink.
+
+    config BLINK_PERIOD
+        int "Blink period in ms"
+        range 10 3600000
+        default 1000
+        help
+            Define the blinking period in milliseconds.
+
     config BROKER_URL
         string "Broker URL"
         default "mqtt://mqtt.eclipseprojects.io"
@@ -9,5 +52,29 @@ menu "Example Configuration"
     config BROKER_URL_FROM_STDIN
         bool
         default y if BROKER_URL = "FROM_STDIN"
+    
+    config BROKER_PORT
+        int "Port number"
+        range 10 36000
+        default 1883
+        help
+            Define the port number for the broker.
 
+    config BROKER_CLIENT_ID
+        string "Broker ClientID"
+        default "esp32_luis"
+        help
+            ClientId of the broker
+
+    config BROKER_USERNAME
+        string "Broker Username"
+        default "luishg0111"
+        help
+            Username of the broker
+
+    config BROKER_PASSWORD
+        string "Broker password"
+        default "aio_ZxpP23dpfPkeiks0nKgM9V0g1TF6"
+        help
+            Password of the broker
 endmenu
